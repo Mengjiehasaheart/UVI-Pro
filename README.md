@@ -111,10 +111,13 @@ Erythemally weighted irradiance and dose follow from the definitions in the prec
 
 Internal consistency is assessed by reaggregating the minute results to hourly means and comparing them with the provider’s hourly UVI. Denoting by $\widehat{\mathrm{UVI}}^{\mathrm{all}}_h$ the mean of $\mathrm{UVI}^{\mathrm{all}}(t)$ over $\mathcal{T}_h$, the error statistics reported are the mean absolute error and the RMSE,
 
-$$
-\mathrm{MAE}=\frac{1}{H}\sum_{h=1}^{H}\left|\widehat{\mathrm{UVI}}^{\mathrm{all}}_h-\mathrm{UVI}^{\mathrm{all}}_h\right|,\qquad
+$
+\mathrm{MAE}=\frac{1}{H}\sum_{h=1}^{H}\left|\widehat{\mathrm{UVI}}^{\mathrm{all}}_h-\mathrm{UVI}^{\mathrm{all}}_h\right|,
+$
+
+$
 \mathrm{RMSE}=\sqrt{\frac{1}{H}\sum_{h=1}^{H}\left(\widehat{\mathrm{UVI}}^{\mathrm{all}}_h-\mathrm{UVI}^{\mathrm{all}}_h\right)^2},
-$$
+$
 
 with $H$ the number of valid hours. Two diagnostic figures accompany these metrics: a one to one scatter between $\widehat{\mathrm{UVI}}^{\mathrm{all}}_h$ and $\mathrm{UVI}^{\mathrm{all}}_h$, and the error series as a function of time. Because the clear sky hourly means are preserved identically by construction, the only sources of discrepancy are the temporal interpolation of $\mathrm{CMF}(t)$ and any provider specific phase differences in the hourly time stamps.
 
