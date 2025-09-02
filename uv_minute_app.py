@@ -2,14 +2,16 @@
 
 __author__ = "Mengjie"
 
-import argparse, sys, math, json, io, os
-from dataclasses import dataclass
-from typing import Dict, Tuple
+import argparse, sys, math, json, io, os, re
+from typing import Optional, Tuple
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), "outputs", ".mplcache"))
+import matplotlib
+matplotlib.use("Agg")
 import requests
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, timedelta
 from dateutil import tz
 import pytz
 
@@ -63,19 +65,111 @@ def fetch_open_meteo_uvi(lat: float, lon: float, start_date: str, end_date: str,
     tzname = js.get("timezone", "UTC")
     times = pd.to_datetime(js["hourly"]["time"])
     df = pd.DataFrame({
-        "datetime_local": times.tz_localize("UTC").tz_convert(tzname),
+        "datetime_local": times.tz_localize(tzname),
         "UVI_all": js["hourly"]["uv_index"],
         "UVI_clear": js["hourly"]["uv_index_clear_sky"],
         "cloud_cover": js["hourly"]["cloud_cover"]
     })
     return df
 
-def minute_engine(lat: float, lon: float, date_str: str, timezone: str = 'auto', p_mu: float = 1.2) -> pd.DataFrame:
+def _list_local_hourly_files(data_dir: str) -> list:
+    if not os.path.isdir(data_dir):
+        return []
+    files = []
+    for name in os.listdir(data_dir):
+        if name.startswith("hourly_") and name.endswith(".csv"):
+            m = re.match(r"hourly_([\-0-9\.]+)_([\-0-9\.]+)_([0-9]{4}-[0-9]{2}-[0-9]{2})\.csv", name)
+            if m:
+                lat = float(m.group(1))
+                lon = float(m.group(2))
+                d = m.group(3)
+                files.append({"path": os.path.join(data_dir, name), "lat": lat, "lon": lon, "date": d})
+    return files
+
+CITY_CATALOG = {
+    "los angeles": {"name": "Los Angeles, US", "lat": 34.0522, "lon": -118.2437, "tz": "America/Los_Angeles"},
+    "palermo":     {"name": "Palermo, IT",     "lat": 38.1157, "lon": 13.3615,   "tz": "Europe/Rome"},
+    "catania":     {"name": "Catania, IT",     "lat": 37.5079, "lon": 15.0830,   "tz": "Europe/Rome"},
+    "rome":        {"name": "Rome, IT",        "lat": 41.9028, "lon": 12.4964,   "tz": "Europe/Rome"},
+    "london":      {"name": "London, UK",      "lat": 51.5074, "lon": -0.1278,   "tz": "Europe/London"},
+    "sydney":      {"name": "Sydney, AU",      "lat": -33.8688,"lon": 151.2093,  "tz": "Australia/Sydney"},
+    "new york":    {"name": "New York, US",    "lat": 40.7128, "lon": -74.0060,  "tz": "America/New_York"},
+    "tokyo":       {"name": "Tokyo, JP",       "lat": 35.6762, "lon": 139.6503,  "tz": "Asia/Tokyo"},
+}
+
+def city_lookup(name: str):
+    key = name.strip().lower()
+    if key in CITY_CATALOG:
+        return CITY_CATALOG[key]
+    best = None
+    for k, v in CITY_CATALOG.items():
+        if key in k:
+            best = v
+            break
+    return best
+
+def load_hourly_from_local_db(lat: float, lon: float, date_str: str, data_dir: str = "data") -> pd.DataFrame:
+    os.makedirs(data_dir, exist_ok=True)
+    target = os.path.join(data_dir, f"hourly_{lat:.4f}_{lon:.4f}_{date_str}.csv")
+    if os.path.exists(target):
+        df = pd.read_csv(target, parse_dates=["datetime_local"])
+        if df["datetime_local"].dt.tz is None:
+            df["datetime_local"] = df["datetime_local"].dt.tz_localize("UTC")
+        return df
+    catalog = os.path.join(data_dir, "hourly_data.csv")
+    if os.path.exists(catalog):
+        df_all = pd.read_csv(catalog, parse_dates=["datetime_local"])
+        mask = (
+            (df_all["date"] == date_str)
+            & (np.isclose(df_all["lat"], lat))
+            & (np.isclose(df_all["lon"], lon))
+        )
+        df = df_all.loc[mask, ["datetime_local", "UVI_all", "UVI_clear"]].copy()
+        if not df.empty:
+            if df["datetime_local"].dt.tz is None:
+                df["datetime_local"] = df["datetime_local"].dt.tz_localize("UTC")
+            return df
+    alt = os.path.join("outputs", f"uv_minute_{lat:.4f}_{lon:.4f}_{date_str}.csv")
+    if os.path.exists(alt):
+        mm = pd.read_csv(alt, parse_dates=["datetime_local"])
+        mm = mm.set_index("datetime_local")
+        hourly_all = mm["UVI_all_sky"].resample("1h").mean()
+        hourly_clear = mm["UVI_clear_sky"].resample("1h").mean()
+        out = pd.DataFrame({
+            "datetime_local": hourly_all.index,
+            "UVI_all": hourly_all.values,
+            "UVI_clear": hourly_clear.values,
+        })
+        out.to_csv(target, index=False)
+        out["datetime_local"] = pd.to_datetime(out["datetime_local"])  
+        if out["datetime_local"].dt.tz is None:
+            out["datetime_local"] = out["datetime_local"].dt.tz_localize("UTC")
+        return out
+    raise FileNotFoundError("No local hourly dataset found for the requested location and date")
+
+def save_hourly_to_local_db(df: pd.DataFrame, lat: float, lon: float, date_str: str, data_dir: str = "data") -> str:
+    os.makedirs(data_dir, exist_ok=True)
+    target = os.path.join(data_dir, f"hourly_{lat:.4f}_{lon:.4f}_{date_str}.csv")
+    cols = ["datetime_local", "UVI_all", "UVI_clear"]
+    if not all(c in df.columns for c in cols):
+        tmp = pd.DataFrame({
+            "datetime_local": df["datetime_local"],
+            "UVI_all": df["UVI_all"],
+            "UVI_clear": df["UVI_clear"],
+        })
+    else:
+        tmp = df[cols].copy()
+    tmp.to_csv(target, index=False)
+    return target
+
+def minute_engine(lat: float, lon: float, date_str: str, timezone: str = 'auto', p_mu: float = 1.2, hourly_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     dt = pd.to_datetime(date_str).date()
-    hourly = fetch_open_meteo_uvi(lat, lon, start_date=date_str, end_date=date_str, timezone=timezone)
-    tzname = str(hourly["datetime_local"].dt.tz.zone)
-    day_start = pd.to_datetime(date_str).tz_localize(tzname)
-    minutes = pd.date_range(day_start, day_start + pd.Timedelta(days=1), freq="1min", tz=tzname, inclusive="left")
+    hourly = hourly_df if hourly_df is not None else fetch_open_meteo_uvi(lat, lon, start_date=date_str, end_date=date_str, timezone=timezone)
+    tzobj = hourly["datetime_local"].dt.tz if hasattr(hourly["datetime_local"].dt, "tz") else pytz.UTC
+    if tzobj is None:
+        tzobj = pytz.UTC
+    day_start = pd.to_datetime(date_str).tz_localize(tzobj)
+    minutes = pd.date_range(day_start, day_start + pd.Timedelta(days=1), freq="1min", tz=tzobj, inclusive="left")
     _, mu, _ = solar_position_series(lat, lon, minutes)
     mu = np.clip(np.array(mu), 0.0, None)
 
@@ -132,21 +226,148 @@ def validate_reaggregation(df_minute: pd.DataFrame, hourly_ref: pd.DataFrame, tz
         plt.tight_layout(); plt.savefig(f"{out_prefix}_error_by_hour.png", dpi=150); plt.close()
     return {"MAE": mae, "RMSE": rmse, "n": int(len(joined))}
 
+def prompt_interactive(existing_data: list) -> dict:
+    print("Interactive mode")
+    presets = {
+        "1": {"name": "Los Angeles, US", "lat": 34.0522, "lon": -118.2437, "tz": "America/Los_Angeles"},
+        "2": {"name": "Palermo, IT", "lat": 38.1157, "lon": 13.3615, "tz": "Europe/Rome"},
+        "3": {"name": "Catania, IT", "lat": 37.5079, "lon": 15.0830, "tz": "Europe/Rome"},
+    }
+    print("Choose a preset location or press Enter to type values:")
+    if existing_data:
+        print("[D] Choose from local datasets")
+    print("[C] Choose a city by name (e.g., Rome, London, Sydney)")
+    for k, v in presets.items():
+        print(f"[{k}] {v['name']} ({v['lat']:.4f},{v['lon']:.4f}) {v['tz']}")
+    choice = input("Selection [Enter to skip]: ").strip()
+    if existing_data and (choice.lower() == 'd'):
+        for i, it in enumerate(existing_data, 1):
+            print(f"[{i}] lat {it['lat']:.4f}, lon {it['lon']:.4f}, date {it['date']}")
+        idx = input("Select a dataset by number: ").strip()
+        if idx.isdigit() and 1 <= int(idx) <= len(existing_data):
+            sel = existing_data[int(idx)-1]
+            lat = sel['lat']
+            lon = sel['lon']
+            tzname = "auto"
+            date_str = sel['date']
+            outdir = input("Output directory [outputs]: ").strip() or "outputs"
+            p_mu = input("Exponent p for mu^p [1.2]: ").strip()
+            p_mu = float(p_mu) if p_mu else 1.2
+            print("Data source set to Local")
+            return {"lat": lat, "lon": lon, "tzname": tzname, "date": date_str, "outdir": outdir, "p_mu": p_mu, "source": "local"}
+    if choice.lower() == 'c':
+        print("Known cities:")
+        names = list(CITY_CATALOG.keys())
+        for i, k in enumerate(names, 1):
+            v = CITY_CATALOG[k]
+            print(f"[{i}] {v['name']} ({v['lat']:.4f},{v['lon']:.4f}) {v['tz']}")
+        q = input("Type a city name or choose number: ").strip()
+        selected = None
+        if q.isdigit() and 1 <= int(q) <= len(names):
+            selected = CITY_CATALOG[names[int(q)-1]]
+        else:
+            selected = city_lookup(q)
+        if selected is not None:
+            lat = selected["lat"]
+            lon = selected["lon"]
+            tzname = selected["tz"]
+        else:
+            print("City not found; defaulting to manual entry")
+            lat = float(input("Latitude: ").strip())
+            lon = float(input("Longitude: ").strip())
+            tzname = input("Timezone (IANA, e.g. Europe/Rome or 'auto'): ").strip() or "auto"
+        date_str = input("Date (YYYY-MM-DD, default today): ").strip() or str(date.today())
+        outdir = input("Output directory [outputs]: ").strip() or "outputs"
+        p_mu = input("Exponent p for mu^p [1.2]: ").strip()
+        p_mu = float(p_mu) if p_mu else 1.2
+        print("Data source: [L]ocal database, [A]PI, [Auto]")
+        src = input("Choose source [Auto]: ").strip().lower() or "auto"
+        if src.startswith("l"):
+            source = "local"
+        elif src.startswith("a"):
+            source = "api"
+        else:
+            source = "auto"
+        return {"lat": lat, "lon": lon, "tzname": tzname, "date": date_str, "outdir": outdir, "p_mu": p_mu, "source": source}
+    if choice in presets:
+        lat = presets[choice]["lat"]
+        lon = presets[choice]["lon"]
+        tzname = presets[choice]["tz"]
+    else:
+        lat = float(input("Latitude: ").strip())
+        lon = float(input("Longitude: ").strip())
+        tzname = input("Timezone (IANA, e.g. Europe/Rome or 'auto'): ").strip() or "auto"
+    date_str = input("Date (YYYY-MM-DD, default today): ").strip() or str(date.today())
+    outdir = input("Output directory [outputs]: ").strip() or "outputs"
+    p_mu = input("Exponent p for mu^p [1.2]: ").strip()
+    p_mu = float(p_mu) if p_mu else 1.2
+    print("Data source: [L]ocal database, [A]PI, [Auto]")
+    src = input("Choose source [Auto]: ").strip().lower() or "auto"
+    if src.startswith("l"):
+        source = "local"
+    elif src.startswith("a"):
+        source = "api"
+    else:
+        source = "auto"
+    return {"lat": lat, "lon": lon, "tzname": tzname, "date": date_str, "outdir": outdir, "p_mu": p_mu, "source": source}
+
+def get_hourly(lat: float, lon: float, date_str: str, timezone: str, source: str) -> Tuple[pd.DataFrame, str]:
+    if source == "local":
+        return load_hourly_from_local_db(lat, lon, date_str), "local"
+    if source == "api":
+        return fetch_open_meteo_uvi(lat, lon, start_date=date_str, end_date=date_str, timezone=timezone), "api"
+    try:
+        return load_hourly_from_local_db(lat, lon, date_str), "local"
+    except Exception:
+        return fetch_open_meteo_uvi(lat, lon, start_date=date_str, end_date=date_str, timezone=timezone), "api"
+
 def main():
-    ap = argparse.ArgumentParser(description="A script to calculate minute-by-minute UV data.")
-    ap.add_argument("--lat", type=float, required=True, help="Latitude")
-    ap.add_argument("--lon", type=float, required=True, help="Longitude")
-    ap.add_argument("--date", type=str, required=True, help="Date in YYYY-MM-DD format")
+    ap = argparse.ArgumentParser(description="Minute-resolved UV engine with interactive and local data support")
+    ap.add_argument("--lat", type=float, required=False, help="Latitude")
+    ap.add_argument("--lon", type=float, required=False, help="Longitude")
+    ap.add_argument("--date", type=str, required=False, help="Date in YYYY-MM-DD format")
     ap.add_argument("--timezone", type=str, default='auto', help="Timezone")
     ap.add_argument("--outdir", type=str, default="outputs", help="Output directory")
     ap.add_argument("--p_mu", type=float, default=1.2, help="Exponent for solar radiation calculation")
     ap.add_argument("--html", action="store_true", help="Generate interactive HTML report")
+    ap.add_argument("--source", type=str, default="auto", choices=["auto", "local", "api"], help="Data source")
+    ap.add_argument("--no_cache", action="store_true", help="Do not cache fetched hourly data to data/")
+    ap.add_argument("--interactive", action="store_true", help="Prompt for inputs interactively")
+    ap.add_argument("--city", type=str, required=False, help="City name (e.g., 'Rome', 'London') to autoload lat/lon/timezone")
     args = ap.parse_args()
 
+    if not args.interactive and args.city and (args.lat is None or args.lon is None):
+        info = city_lookup(args.city)
+        if info:
+            args.lat = info["lat"]
+            args.lon = info["lon"]
+            if args.timezone == 'auto':
+                args.timezone = info["tz"]
+    need_prompt = args.interactive or (args.lat is None or args.lon is None or args.date is None)
+    if need_prompt:
+        files = _list_local_hourly_files("data")
+        params = prompt_interactive(files)
+        args.lat = params["lat"]
+        args.lon = params["lon"]
+        args.timezone = params["tzname"]
+        args.date = params["date"]
+        args.outdir = params["outdir"]
+        args.p_mu = params["p_mu"]
+        args.source = params["source"]
+
     os.makedirs(args.outdir, exist_ok=True)
-    hourly = fetch_open_meteo_uvi(args.lat, args.lon, args.date, args.date, args.timezone)
-    tzname = str(hourly["datetime_local"].dt.tz.zone)
-    df = minute_engine(args.lat, args.lon, args.date, args.timezone, p_mu=args.p_mu)
+    try:
+        hourly, src_used = get_hourly(args.lat, args.lon, args.date, args.timezone, args.source)
+    except Exception as e:
+        print(str(e))
+        print("Falling back to local data if available")
+        hourly = load_hourly_from_local_db(args.lat, args.lon, args.date)
+        src_used = "local"
+    if src_used == "api" and not args.no_cache:
+        save_hourly_to_local_db(hourly, args.lat, args.lon, args.date)
+    tzobj = hourly["datetime_local"].dt.tz if hasattr(hourly["datetime_local"].dt, "tz") else pytz.UTC
+    tzname = str(tzobj)
+    df = minute_engine(args.lat, args.lon, args.date, args.timezone, p_mu=args.p_mu, hourly_df=hourly)
     csv_path = os.path.join(args.outdir, f"uv_minute_{args.lat:.4f}_{args.lon:.4f}_{args.date}.csv")
     df.to_csv(csv_path, index=False)
     val = validate_reaggregation(df, hourly, tzname, out_prefix=os.path.join(args.outdir, "validation"))

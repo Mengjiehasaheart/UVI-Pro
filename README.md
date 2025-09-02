@@ -134,9 +134,25 @@ Last thing to keep in mind that the preservation of hourly clear sky means const
 
 The following example invokes the program for Catania in Sicily on 2025‑08‑17 using the Europe/Rome timezone and writes all outputs to a directory named `outputs`.
 ```
-python uv_minute_app.py --lat 37.5079 --lon 15.0830 --date 2025-08-17 --timezone Europe/Rome --outdir outputs --html
+python uv_minute_app.py --lat 37.5079 --lon 15.0830 --date 2025-08-17 --timezone Europe/Rome --outdir outputs --html --source api
 ```
-It also prints a small JSON report to standard output and populates the output directory with the CSV, figures, and validation metrics. All timestamps in the CSV are expressed in the local timezone reported by the data provider.
+Alternatively, run interactively and choose a data source (local database or API), including a city lookup:
+```
+python uv_minute_app.py --interactive
+```
+You can also provide a city directly without typing coordinates:
+```
+python uv_minute_app.py --city Rome --date 2025-08-17 --source api --outdir outputs_rome --html
+```
+To work offline, place hourly datasets as CSV in `data/` named `hourly_<lat>_<lon>_<YYYY-MM-DD>.csv` with columns `datetime_local,UVI_all,UVI_clear` (timezone-aware timestamps). The app auto-detects these and builds minute outputs without network access. If you fetch from the API, the hourly CSV is cached to `data/` by default; disable with `--no_cache`.
+
+Sample hourly datasets included in `data/`:
+- Palermo, IT `38.1157,13.3615` on `2025-08-17`
+- Catania, IT `37.5079,15.0830` on `2025-08-17`
+- London, UK `51.5074,-0.1278` on `2025-06-21`
+- Sydney, AU `-33.8688,151.2093` on `2025-12-21`
+
+It prints a small JSON report to standard output and populates the output directory with the CSV, figures, and validation metrics. All timestamps in the CSV are expressed in the local timezone reported by the data provider or embedded in the local dataset.
 
 
 ## References
