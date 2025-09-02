@@ -87,14 +87,35 @@ def _list_local_hourly_files(data_dir: str) -> list:
     return files
 
 CITY_CATALOG = {
-    "los angeles": {"name": "Los Angeles, US", "lat": 34.0522, "lon": -118.2437, "tz": "America/Los_Angeles"},
-    "palermo":     {"name": "Palermo, IT",     "lat": 38.1157, "lon": 13.3615,   "tz": "Europe/Rome"},
-    "catania":     {"name": "Catania, IT",     "lat": 37.5079, "lon": 15.0830,   "tz": "Europe/Rome"},
-    "rome":        {"name": "Rome, IT",        "lat": 41.9028, "lon": 12.4964,   "tz": "Europe/Rome"},
-    "london":      {"name": "London, UK",      "lat": 51.5074, "lon": -0.1278,   "tz": "Europe/London"},
-    "sydney":      {"name": "Sydney, AU",      "lat": -33.8688,"lon": 151.2093,  "tz": "Australia/Sydney"},
-    "new york":    {"name": "New York, US",    "lat": 40.7128, "lon": -74.0060,  "tz": "America/New_York"},
-    "tokyo":       {"name": "Tokyo, JP",       "lat": 35.6762, "lon": 139.6503,  "tz": "Asia/Tokyo"},
+    "new york":    {"name": "New York, US",    "lat": 40.7128,  "lon": -74.0060,  "tz": "America/New_York"},
+    "los angeles": {"name": "Los Angeles, US", "lat": 34.0522,  "lon": -118.2437, "tz": "America/Los_Angeles"},
+    "chicago":     {"name": "Chicago, US",     "lat": 41.8781,  "lon": -87.6298,  "tz": "America/Chicago"},
+    "toronto":     {"name": "Toronto, CA",     "lat": 43.6532,  "lon": -79.3832,  "tz": "America/Toronto"},
+    "mexico city": {"name": "Mexico City, MX", "lat": 19.4326,  "lon": -99.1332,  "tz": "America/Mexico_City"},
+    "sao paulo":   {"name": "Sao Paulo, BR",   "lat": -23.5505, "lon": -46.6333,  "tz": "America/Sao_Paulo"},
+    "buenos aires": {"name": "Buenos Aires, AR","lat": -34.6037, "lon": -58.3816,  "tz": "America/Argentina/Buenos_Aires"},
+    "london":      {"name": "London, UK",      "lat": 51.5074,  "lon": -0.1278,   "tz": "Europe/London"},
+    "paris":       {"name": "Paris, FR",       "lat": 48.8566,  "lon": 2.3522,    "tz": "Europe/Paris"},
+    "berlin":      {"name": "Berlin, DE",      "lat": 52.5200,  "lon": 13.4050,   "tz": "Europe/Berlin"},
+    "madrid":      {"name": "Madrid, ES",      "lat": 40.4168,  "lon": -3.7038,   "tz": "Europe/Madrid"},
+    "rome":        {"name": "Rome, IT",        "lat": 41.9028,  "lon": 12.4964,   "tz": "Europe/Rome"},
+    "palermo":     {"name": "Palermo, IT",     "lat": 38.1157,  "lon": 13.3615,   "tz": "Europe/Rome"},
+    "catania":     {"name": "Catania, IT",     "lat": 37.5079,  "lon": 15.0830,   "tz": "Europe/Rome"},
+    "istanbul":    {"name": "Istanbul, TR",    "lat": 41.0082,  "lon": 28.9784,   "tz": "Europe/Istanbul"},
+    "dubai":       {"name": "Dubai, AE",       "lat": 25.2048,  "lon": 55.2708,   "tz": "Asia/Dubai"},
+    "cairo":       {"name": "Cairo, EG",       "lat": 30.0444,  "lon": 31.2357,   "tz": "Africa/Cairo"},
+    "johannesburg": {"name": "Johannesburg, ZA","lat": -26.2041, "lon": 28.0473,   "tz": "Africa/Johannesburg"},
+    "nairobi":     {"name": "Nairobi, KE",     "lat":  -1.2921, "lon": 36.8219,   "tz": "Africa/Nairobi"},
+    "moscow":      {"name": "Moscow, RU",      "lat": 55.7558,  "lon": 37.6173,   "tz": "Europe/Moscow"},
+    "tokyo":       {"name": "Tokyo, JP",       "lat": 35.6762,  "lon": 139.6503,  "tz": "Asia/Tokyo"},
+    "shanghai":    {"name": "Shanghai, CN",    "lat": 31.2304,  "lon": 121.4737,  "tz": "Asia/Shanghai"},
+    "singapore":   {"name": "Singapore, SG",   "lat": 1.3521,   "lon": 103.8198,  "tz": "Asia/Singapore"},
+    "hong kong":   {"name": "Hong Kong, HK",   "lat": 22.3193,  "lon": 114.1694,  "tz": "Asia/Hong_Kong"},
+    "mumbai":      {"name": "Mumbai, IN",      "lat": 19.0760,  "lon": 72.8777,   "tz": "Asia/Kolkata"},
+    "sydney":      {"name": "Sydney, AU",      "lat": -33.8688, "lon": 151.2093,  "tz": "Australia/Sydney"},
+    "melbourne":   {"name": "Melbourne, AU",   "lat": -37.8136, "lon": 144.9631,  "tz": "Australia/Melbourne"},
+    "seoul":       {"name": "Seoul, KR",       "lat": 37.5665,  "lon": 126.9780,  "tz": "Asia/Seoul"},
+    "beijing":     {"name": "Beijing, CN",     "lat": 39.9042,  "lon": 116.4074,  "tz": "Asia/Shanghai"},
 }
 
 def city_lookup(name: str):
@@ -321,6 +342,48 @@ def get_hourly(lat: float, lon: float, date_str: str, timezone: str, source: str
     except Exception:
         return fetch_open_meteo_uvi(lat, lon, start_date=date_str, end_date=date_str, timezone=timezone), "api"
 
+def _collect_cached_dates(lat: float, lon: float, data_dir: str = "data") -> list:
+    dates = []
+    if not os.path.isdir(data_dir):
+        return dates
+    prefix = f"hourly_{lat:.4f}_{lon:.4f}_"
+    for name in os.listdir(data_dir):
+        if name.startswith(prefix) and name.endswith('.csv'):
+            dates.append(name.replace(prefix, '').replace('.csv',''))
+    return sorted(dates)
+
+def generate_world_map_html(out_path: str, catalog: dict):
+    items = []
+    for k, v in catalog.items():
+        lat = float(v["lat"])
+        lon = float(v["lon"])
+        dates = _collect_cached_dates(lat, lon)
+        items.append({
+            "name": v["name"],
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "tz": v["tz"],
+            "dates": dates,
+        })
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>")
+        f.write("<title>Mengjie's UVI World Engine</title>")
+        f.write("<link rel=\"stylesheet\" href=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\" integrity=\"sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=\" crossorigin=\"\"/>")
+        f.write("<style>html,body,#map{height:100%;margin:0;} .panel{position:absolute;left:10px;background:#fff;padding:8px 10px;border:1px solid #ddd;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);} .panel-title{top:10px;} .panel-help{top:70px;} .brand{font-size:16px;font-weight:600;color:#111} .by{font-size:12px;color:#444;margin-top:2px} .btn{display:inline-block;padding:4px 8px;border:1px solid #888;border-radius:4px;margin:2px 0;cursor:pointer;} .small{font-size:12px;color:#333} ul{margin:4px 0 0 14px;padding:0;} li{margin:0;padding:0;} </style>")
+        f.write("</head><body>")
+        f.write("<div id='map'></div>")
+        f.write("<div class='panel panel-title'><div class='brand'>Mengjie's UVI World Engine</div><div class='by'>by Mengjie Fan</div></div>")
+        f.write("<div class='panel panel-help small'>Click a city marker to see cached dates and a copyable CLI command.</div>")
+        f.write("<script src=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\" integrity=\"sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=\" crossorigin=\"\"></script>")
+        f.write("<script>const CITIES = "+json.dumps(items)+";\n")
+        f.write("const map = L.map('map',{worldCopyJump:true}).setView([20,0], 2);\n")
+        f.write("L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom: 8, attribution: '&copy; OpenStreetMap contributors'}).addTo(map);\n")
+        f.write("function popupHtml(c){const lat=c.lat.toFixed(4),lon=c.lon.toFixed(4);let h=`<b>${c.name}</b><br><span class=small>${lat}, ${lon} — ${c.tz}</span>`; if(c.dates.length){h+=`<div class=small><b>Cached dates:</b><ul>`; c.dates.forEach(d=>{const outCsv=`outputs/uv_minute_${lat}_${lon}_${d}.csv`; h+=`<li>${d} — <a href='${outCsv}' target='_blank'>CSV</a> <span class=btn onclick=copyCmd('${lat}','${lon}','${d}')>Copy CLI</span></li>`}); h+='</ul></div>'; } else { h+=`<div class=small>No cached datasets. <span class=btn onclick=copyCmd('${lat}','${lon}', new Date().toISOString().slice(0,10))>Copy CLI for today</span></div>`;} return h;}\n")
+        f.write("function copyCmd(lat,lon,date){const cmd=`python uv_minute_app.py --lat ${lat} --lon ${lon} --date ${date} --source api --outdir outputs --html`; navigator.clipboard.writeText(cmd).then(()=>{alert('Copied to clipboard:\n'+cmd);});}\n")
+        f.write("CITIES.forEach(c=>{const m=L.marker([c.lat,c.lon]).addTo(map); m.bindPopup(popupHtml(c)); m.bindTooltip(c.name);});\n")
+        f.write("</script></body></html>")
+
 def main():
     ap = argparse.ArgumentParser(description="Minute-resolved UV engine with interactive and local data support")
     ap.add_argument("--lat", type=float, required=False, help="Latitude")
@@ -334,7 +397,14 @@ def main():
     ap.add_argument("--no_cache", action="store_true", help="Do not cache fetched hourly data to data/")
     ap.add_argument("--interactive", action="store_true", help="Prompt for inputs interactively")
     ap.add_argument("--city", type=str, required=False, help="City name (e.g., 'Rome', 'London') to autoload lat/lon/timezone")
+    ap.add_argument("--worldmap", action="store_true", help="Generate a world map HTML with city markers from catalog and cached data")
+    ap.add_argument("--map_out", type=str, default=os.path.join("outputs", "world_map.html"), help="Output path for world map HTML")
     args = ap.parse_args()
+
+    if args.worldmap:
+        generate_world_map_html(args.map_out, CITY_CATALOG)
+        print(json.dumps({"world_map": args.map_out, "cities": len(CITY_CATALOG)}))
+        return
 
     if not args.interactive and args.city and (args.lat is None or args.lon is None):
         info = city_lookup(args.city)
@@ -385,14 +455,16 @@ def main():
     if args.html:
         html_path = os.path.join(args.outdir, "interactive.html")
         with open(html_path, "w", encoding="utf-8") as f:
-            f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>Minute UV</title>")
-            f.write("<style>body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }")
-            f.write("img { max-width: 100%; height: auto; border: 1px solid #ddd; } h1 { margin: 0 0 10px 0; }</style></head><body>")
-            f.write(f"<h1>Minute UV — {args.date}</h1>")
+            f.write("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>")
+            f.write("<title>Mengjie's UVI World Engine</title>")
+            f.write("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;} .header{padding:14px 20px;border-bottom:1px solid #eee;background:#fafafa} .brand{font-weight:600;font-size:18px} .by{font-size:12px;color:#555;margin-top:2px} .content{padding:20px;} img{max-width:100%;height:auto;border:1px solid #ddd} h2{margin:10px 0 6px 0;font-size:16px}</style></head><body>")
+            f.write("<div class='header'><div class='brand'>Mengjie's UVI World Engine</div><div class='by'>by Mengjie Fan</div></div>")
+            f.write("<div class='content'>")
+            f.write(f"<h2>Run summary — {args.date}</h2>")
             f.write(f"<p><b>Location:</b> lat {args.lat:.4f}, lon {args.lon:.4f} — timezone {tzname}</p>")
             f.write(f"<p><a href='uvi_minute.png'>UVI (clear vs all-sky)</a> • <a href='dose_sed.png'>Cumulative dose (SED)</a> • <a href='{os.path.basename(csv_path)}'>Download CSV</a></p>")
             f.write("<p><a href='validation_scatter.png'>Validation scatter</a> • <a href='validation_error_by_hour.png'>Validation error by hour</a> • <a href='validation.json'>Validation metrics</a></p>")
-            f.write("</body></html>")
+            f.write("</div></body></html>")
     print(json.dumps({"csv": csv_path, "validation": val}, indent=2))
 
 if __name__ == "__main__":
